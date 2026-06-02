@@ -72,43 +72,8 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
     return { email: config.auth.email, password };
   }
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const ask = (q: string): Promise<string> =>
-    new Promise((resolve) => rl.question(q, resolve));
-
-  console.log('No credentials found. Please enter your kicktipp.com login:');
-  const email = await ask('Email: ');
-  const password = await new Promise<string>((resolve) => {
-    process.stdout.write('Password: ');
-    const stdin = process.stdin;
-    const wasRaw = stdin.isRaw;
-    if (stdin.isTTY) stdin.setRawMode(true);
-    let pwd = '';
-    const onData = (ch: Buffer) => {
-      const c = ch.toString();
-      if (c === '\n' || c === '\r') {
-        stdin.removeListener('data', onData);
-        if (stdin.isTTY && wasRaw !== undefined) stdin.setRawMode(wasRaw);
-        process.stdout.write('\n');
-        resolve(pwd);
-      } else if (c === '\u0003') {
-        process.exit(1);
-      } else if (c === '\u007f') {
-        pwd = pwd.slice(0, -1);
-      } else {
-        pwd += c;
-      }
-    };
-    stdin.resume();
-    stdin.on('data', onData);
-  });
-  rl.close();
-
-  const config2 = readConfig();
-  config2.auth = { email, password: encrypt(password) };
-  writeConfig(config2);
-  console.log('Credentials saved to config.');
-  return { email, password };
+  // Credentials not found and not in env vars - throw error instead of waiting for stdin
+  throw new Error('No credentials found. Set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal.');
 }
 
 export function loadCommunity(): string | null {
