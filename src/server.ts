@@ -294,6 +294,23 @@ mutatingTool(
 );
 
 tool(
+  '_debug_html',
+  'INTERNAL: fetch a kicktipp page and return up to N chars of raw HTML for inspection. Path is community-relative (e.g. "spielleiter/mitgliederliste"). Remove this tool once debugging is done.',
+  {
+    path: z.string().describe('Path relative to the community root, e.g. "spielleiter/mitgliederliste".'),
+    maxChars: z.number().int().min(100).max(50000).optional().describe('Max chars to return (default 8000).'),
+  },
+  async ({ path, maxChars }) => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    const url = `https://www.kicktipp.de/${encodeURIComponent(community)}/${path.replace(/^\/+/, '')}`;
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    const html = await page.content();
+    return { content: [{ type: 'text', text: JSON.stringify({ url: page.url(), htmlLength: html.length, html: html.slice(0, maxChars ?? 8000) }, null, 2) }] };
+  },
+);
+
+tool(
   'list_members',
   'ADMIN ONLY: List all members of the community with their tipperId and status (Dummy/active). Use this to find a member by name and look up their tipperId for place_bets_for_member. Requires the logged-in user to be a Spielleiter (admin) of the community.',
   {},

@@ -632,11 +632,23 @@ async function discoverSaisonId(page: Page, community: string): Promise<string> 
 export async function placeBetsForMember(
   page: Page,
   community: string,
-  tipperId: string,
+  tipperIdOrName: string,
   bets: string[],
   matchday?: number,
   submit = true,
 ): Promise<PlacedBet[]> {
+  // Accept either a numeric tipperId or a human name; resolve names via
+  // the member list so the caller doesn't have to look up the ID first.
+  let tipperId = tipperIdOrName;
+  if (!/^\d+$/.test(tipperId)) {
+    const members = await fetchMembers(page, community);
+    if (!Array.isArray(members)) {
+      throw new Error(`Cannot resolve "${tipperIdOrName}" — member list parser failed. Pass a numeric tipperId instead.`);
+    }
+    const match = members.find((m) => m.name.toLowerCase() === tipperIdOrName.toLowerCase());
+    if (!match) throw new Error(`Member "${tipperIdOrName}" not found. Use list_members to see available names.`);
+    tipperId = match.tipperId;
+  }
   const tippsaisonId = await discoverSaisonId(page, community);
   let url = `${URL_BASE}/${encodeURIComponent(community)}/spielleiter/tippsnachtragen?tipperId=${encodeURIComponent(tipperId)}&tippsaisonId=${encodeURIComponent(tippsaisonId)}`;
   if (matchday !== undefined) {
