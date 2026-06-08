@@ -571,62 +571,40 @@ export interface MemberEntry {
   status?: string;
 }
 
-export async function fetchMembers(page: Page, community: string): Promise<MemberEntry[] | { _diagnostic: unknown }> {
+export interface MemberDetail extends MemberEntry {
+  email?: string;
+  tippsaisonId: string;
+}
+
+export async function fetchMembers(page: Page, community: string): Promise<MemberDetail[]> {
   const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/spielleiter/mitgliederliste`);
-  const members = new Map<string, MemberEntry>();
-
-  // Try several known patterns for member identification.
-  const patterns: Array<{ selector: string; idRegex: RegExp }> = [
-    { selector: 'a[href*="tipperId="]', idRegex: /tipperId=(\d+)/ },
-    { selector: 'a[href*="tipper="]', idRegex: /tipper=(\d+)/ },
-    { selector: 'a[href*="mitglied="]', idRegex: /mitglied=(\d+)/ },
-    { selector: 'a[href*="/spielleiter/mitgliedsdaten"]', idRegex: /(\d{4,})/ },
-    { selector: 'a[href*="tippsnachtragen"]', idRegex: /tipperId=(\d+)/ },
-  ];
-  for (const { selector, idRegex } of patterns) {
-    $(selector).each((_, el) => {
-      const href = $(el).attr('href') || '';
-      const m = href.match(idRegex);
-      if (!m) return;
-      const tipperId = m[1];
-      const name = $(el).text().trim();
-      if (!name) return;
-      const rowText = $(el).closest('tr').text().trim();
-      const status = /Dummy/i.test(rowText) ? 'Dummy' : /aktiv/i.test(rowText) ? 'active' : undefined;
-      if (!members.has(tipperId)) members.set(tipperId, { name, tipperId, status });
+  // Each row carries: data-url="mitgliedsdatenanzeigen?tipperId=X&tippsaisonId=Y"
+  // Columns: col0=#, col1=name, col2=email ("-" for Dummy), col3=joined date, col4=points
+  const members: MemberDetail[] = [];
+  $('tr.datarow[data-url*="tipperId="]').each((_, tr) => {
+    const dataUrl = $(tr).attr('data-url') || '';
+    const tipperMatch = dataUrl.match(/tipperId=(\d+)/);
+    const saisonMatch = dataUrl.match(/tippsaisonId=(\d+)/);
+    if (!tipperMatch || !saisonMatch) return;
+    const name = $(tr).find('td.col1').text().trim();
+    const email = $(tr).find('td.col2').text().trim();
+    if (!name) return;
+    members.push({
+      name,
+      tipperId: tipperMatch[1],
+      tippsaisonId: saisonMatch[1],
+      email: email === '-' ? undefined : email,
+      status: email === '-' ? 'Dummy' : 'active',
     });
-    if (members.size) return Array.from(members.values());
-  }
-
-  // Diagnostic dump so we can adjust the parser without redeploying blind.
-  const allAnchors = $('a').toArray().slice(0, 25).map((el) => ({
-    href: $(el).attr('href') || null,
-    text: $(el).text().trim().slice(0, 60),
-  }));
-  const tableRows = $('table tbody tr').toArray().slice(0, 5).map((tr) => $(tr).html()?.slice(0, 500) || '');
-  return {
-    _diagnostic: {
-      message: 'No members found by any known pattern. Paste this back so the parser can be adjusted.',
-      pageTitle: $('title').text().trim(),
-      contentH1: $('#kicktipp-content h1, .pagetitle').first().text().trim(),
-      anchorSample: allAnchors,
-      tableRowSamples: tableRows,
-    },
-  };
+  });
+  return members;
 }
 
 async function discoverSaisonId(page: Page, community: string): Promise<string> {
-  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/spielleiter/tippsnachtragen`);
-  // The picker page links/forms include tippsaisonId — grab the first.
-  for (const el of $('a[href*="tippsaisonId="], form[action*="tippsaisonId="]').toArray()) {
-    const attr = $(el).attr('href') || $(el).attr('action') || '';
-    const m = attr.match(/tippsaisonId=(\d+)/);
-    if (m) return m[1];
-  }
-  // Fallback: hidden input.
-  const hidden = $('input[name="tippsaisonId"]').attr('value');
-  if (hidden) return hidden;
-  throw new Error('Could not discover tippsaisonId from admin tippsnachtragen page.');
+  // Cheaper than the dedicated picker page: pull it from the first member row.
+  const members = await fetchMembers(page, community);
+  if (members.length && members[0].tippsaisonId) return members[0].tippsaisonId;
+  throw new Error('Could not discover tippsaisonId — member list is empty or unparseable.');
 }
 
 export async function placeBetsForMember(
@@ -640,41 +618,38 @@ export async function placeBetsForMember(
   // Accept either a numeric tipperId or a human name; resolve names via
   // the member list so the caller doesn't have to look up the ID first.
   let tipperId = tipperIdOrName;
+  let tippsaisonId: string | undefined;
   if (!/^\d+$/.test(tipperId)) {
     const members = await fetchMembers(page, community);
-    if (!Array.isArray(members)) {
-      throw new Error(`Cannot resolve "${tipperIdOrName}" — member list parser failed. Pass a numeric tipperId instead.`);
-    }
     const match = members.find((m) => m.name.toLowerCase() === tipperIdOrName.toLowerCase());
     if (!match) throw new Error(`Member "${tipperIdOrName}" not found. Use list_members to see available names.`);
     tipperId = match.tipperId;
+    tippsaisonId = match.tippsaisonId;
   }
-  const tippsaisonId = await discoverSaisonId(page, community);
+  if (!tippsaisonId) tippsaisonId = await discoverSaisonId(page, community);
   let url = `${URL_BASE}/${encodeURIComponent(community)}/spielleiter/tippsnachtragen?tipperId=${encodeURIComponent(tipperId)}&tippsaisonId=${encodeURIComponent(tippsaisonId)}`;
   if (matchday !== undefined) {
     if (matchday < 1 || matchday > 34) throw new RangeError(`Matchday '${matchday}' is not valid, use 1-34.`);
     url += `&spieltagIndex=${matchday}`;
   }
   const $ = await loadPage(page, url);
-  const tbody = $('#kicktipp-content tbody');
+  const tbody = $('table#tippsnachtragenSpiele tbody');
   if (!tbody.length) throw new Error('No matches found on tippsnachtragen page.');
 
+  // Each row: col0=date, col1=home, col2=away, col3=inputs.
+  // Input names look like spieltippNachtragenForms[<id>].heimTippString.
   const editable: EditableMatch[] = [];
-  tbody.find('tr').each((_, tr) => {
+  tbody.find('tr.datarow').each((_, tr) => {
     const cols = $(tr).find('td');
     if (cols.length < 4) return;
-    // Layout: [date, home, away, score-inputs, ...]. Inputs may have
-    // different id suffixes here; match by name pattern instead.
-    const inputs = $(tr).find('input[type="text"], input:not([type])');
-    if (inputs.length < 2) return;
-    const heimName = inputs.eq(0).attr('name');
-    const gastName = inputs.eq(1).attr('name');
-    if (!heimName || !gastName) return;
+    const heimInput = $(tr).find('input[id$="_heimTippString"]');
+    const gastInput = $(tr).find('input[id$="_gastTippString"]');
+    if (!heimInput.length || !gastInput.length) return;
     editable.push({
       home: $(cols[1]).text().trim(),
       away: $(cols[2]).text().trim(),
-      heimName,
-      gastName,
+      heimName: heimInput.attr('name')!,
+      gastName: gastInput.attr('name')!,
     });
   });
 
