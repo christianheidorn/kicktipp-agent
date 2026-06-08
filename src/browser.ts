@@ -28,8 +28,7 @@ export async function launchBrowser(
       storageState: sessionFile,
     });
     const page = await context.newPage();
-    await page.goto(URL_BASE);
-    await page.waitForLoadState('domcontentloaded');
+    await page.goto(URL_BASE, { waitUntil: 'domcontentloaded' });
     if (!page.url().includes('/login')) {
       statusClear();
       return { browser, page, context };
@@ -73,8 +72,7 @@ export async function dismissConsent(page: Page): Promise<void> {
 
 async function login(page: Page, username: string, password: string): Promise<void> {
   status('Logging in...');
-  await page.goto(URL_LOGIN);
-  await page.waitForLoadState('domcontentloaded');
+  await page.goto(URL_LOGIN, { waitUntil: 'domcontentloaded' });
   await dismissConsent(page);
   await page.fill('input[name="kennung"]', username);
   await page.fill('input[name="passwort"]', password);
@@ -88,8 +86,7 @@ async function login(page: Page, username: string, password: string): Promise<vo
 
 export async function getCommunities(page: Page): Promise<string[]> {
   status('Fetching communities...');
-  await page.goto(`${URL_BASE}/info/profil/meinetipprunden`);
-  await page.waitForLoadState('domcontentloaded');
+  await page.goto(`${URL_BASE}/info/profil/meinetipprunden`, { waitUntil: 'domcontentloaded' });
   await dismissConsent(page);
   const finalUrl = page.url();
   if (/\/(login|profile\/login|profil\/login)(\?|$|\/)/i.test(finalUrl)) {
@@ -123,7 +120,7 @@ export function parseOdds($: cheerio.CheerioAPI, td: AnyNode): [string, string, 
 
 export async function getPlayers(page: Page, community: string): Promise<string[]> {
   status('Fetching players...');
-  await page.goto(getLeaderboardUrl(community));
+  await page.goto(getLeaderboardUrl(community), { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('domcontentloaded');
   await dismissConsent(page);
   statusClear();

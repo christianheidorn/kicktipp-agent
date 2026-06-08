@@ -13,8 +13,10 @@ import { escapeCssValue } from './helpers/escape-css-value.js';
 // ── Shared helpers ─────────────────────────────────────────────────
 
 async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
-  await page.goto(url);
-  await page.waitForLoadState('domcontentloaded');
+  // Default waitUntil 'load' waits for every image + iframe (incl. the
+  // consent-banner iframe). On a fresh login + cold start that easily
+  // exceeds 30s. 'domcontentloaded' is enough — kicktipp renders server-side.
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
   await dismissConsent(page);
   // Kicktipp redirects to /login when the session is invalid. Surface this
   // as an explicit error so callers don't silently get empty parse results.
