@@ -82,14 +82,16 @@ export async function getSessionPage(email: string, password: string): Promise<P
     await evict(key);
   }
 
-  await enforceCapacity();
-
-  const launchPromise = launchBrowser({ email, password, sessionFile: null }).then(({ browser, context, page }) => {
-    const entry: Entry = { browser, context, page, lastUsed: Date.now(), inFlight: null };
-    pool.set(key, entry);
-    return page;
+  // Insert the placeholder synchronously BEFORE the await so concurrent
+  // getSessionPage calls for new users don't all race past the capacity
+  // check and overshoot MAX_SESSIONS. Then enforce capacity (which may
+  // evict other entries) and finally kick off the launch.
+  let resolveLaunch!: (p: Page) => void;
+  let rejectLaunch!: (err: unknown) => void;
+  const launchPromise = new Promise<Page>((resolve, reject) => {
+    resolveLaunch = resolve;
+    rejectLaunch = reject;
   });
-
   const placeholder: Entry = {
     browser: null as unknown as Browser,
     context: null as unknown as BrowserContext,
@@ -98,6 +100,14 @@ export async function getSessionPage(email: string, password: string): Promise<P
     inFlight: launchPromise,
   };
   pool.set(key, placeholder);
+
+  await enforceCapacity();
+
+  launchBrowser({ email, password, sessionFile: null }).then(({ browser, context, page }) => {
+    const entry: Entry = { browser, context, page, lastUsed: Date.now(), inFlight: null };
+    pool.set(key, entry);
+    resolveLaunch(page);
+  }, rejectLaunch);
 
   try {
     return await launchPromise;

@@ -125,7 +125,10 @@ export function loadCommunity(): string | null {
 }
 
 export function saveCommunity(name: string): void {
-  if (requestContext.getStore()?.community || process.env.KICKTIPP_COMMUNITY) {
+  // Refuse any save when running inside a request context (HTTP mode) — the
+  // local config.ini belongs to the operator, never the caller, so writing
+  // through it would leak the caller's choice across tenants.
+  if (requestContext.getStore() || process.env.KICKTIPP_COMMUNITY) {
     throw new Error('Community is set per-request or via KICKTIPP_COMMUNITY env var and cannot be changed at runtime.');
   }
   const config = readConfig();
@@ -142,7 +145,7 @@ export function loadPlayer(): string | null {
 }
 
 export function savePlayer(name: string): void {
-  if (requestContext.getStore()?.player || process.env.KICKTIPP_PLAYER) {
+  if (requestContext.getStore() || process.env.KICKTIPP_PLAYER) {
     throw new Error('Player is set per-request or via KICKTIPP_PLAYER env var and cannot be changed at runtime.');
   }
   const config = readConfig();

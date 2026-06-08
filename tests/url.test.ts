@@ -4,13 +4,13 @@ import { getPredictUrl } from '../src/url.js';
 describe('getPredictUrl', () => {
   it('without matchday', () => {
     expect(getPredictUrl('mycomm')).toBe(
-      'https://www.kicktipp.com/mycomm/predict',
+      'https://www.kicktipp.de/mycomm/tippabgabe',
     );
   });
 
   it('with matchday', () => {
     expect(getPredictUrl('mycomm', 5)).toBe(
-      'https://www.kicktipp.com/mycomm/predict?spieltagIndex=5',
+      'https://www.kicktipp.de/mycomm/tippabgabe?spieltagIndex=5',
     );
   });
 

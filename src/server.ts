@@ -47,7 +47,13 @@ async function withFreshSession<T>(fn: () => Promise<T>): Promise<T> {
 
 async function getPage(): Promise<Page> {
   const ctx = requestContext.getStore();
-  if (ctx?.email && ctx?.password) {
+  if (ctx) {
+    // Inside a request context (HTTP mode) credentials MUST come from the
+    // request — never fall back to the operator's local config/env, or one
+    // user's session could be served to another.
+    if (!ctx.email || !ctx.password) {
+      throw new Error('No credentials in request context.');
+    }
     return getSessionPage(ctx.email, ctx.password);
   }
   if (pageInstance) {
@@ -75,16 +81,19 @@ async function getPage(): Promise<Page> {
 export function createServer(): McpServer {
 const server = new McpServer(
   { name: 'kicktipp', version: '1.0.0' },
-  { instructions: 'kicktipp.com football prediction game. IMPORTANT: Call get_status first to check if credentials and a community are configured. If credentials are missing, tell the user to either set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal. If only the community is missing, call get_communities then set_community.' },
+  { instructions: 'kicktipp.com football prediction game. IMPORTANT: Call get_status first to check if credentials and a community are configured. If credentials are missing or invalid, the operator needs to provide them (env vars for stdio mode, Authorization header for HTTP mode). If only the community is missing, call get_communities then set_community.' },
 );
 
-// Wrap server.tool so every handler auto-retries once if the cached kicktipp
-// session is stale (cookie expired between requests).
+// Wrap server.tool so read-only handlers auto-retry once if the cached
+// kicktipp session is stale (cookie expired between requests). Mutating
+// tools (place_bets, place_bonus_bets) must NOT retry — the first attempt
+// may have already submitted data server-side, and a retry would re-submit.
 const tool: typeof server.tool = ((...args: unknown[]) => {
   const handler = args.pop() as (...a: unknown[]) => Promise<unknown>;
   const wrapped = (...handlerArgs: unknown[]) => withFreshSession(() => handler(...handlerArgs));
   return (server.tool as (...a: unknown[]) => unknown)(...args, wrapped);
 }) as typeof server.tool;
+const mutatingTool = server.tool.bind(server);
 
 tool(
   'get_status',
@@ -223,7 +232,7 @@ tool(
   },
 );
 
-tool(
+mutatingTool(
   'set_community',
   'Set the active community. Use get_communities first to see available options, then pass the exact name.',
   { name: z.string().describe('Exact community name as returned by get_communities.') },
@@ -238,7 +247,7 @@ tool(
   },
 );
 
-tool(
+mutatingTool(
   'set_player',
   'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
   { name: z.string().describe('Exact player name as returned by get_players.') },
@@ -266,7 +275,7 @@ tool(
   },
 );
 
-tool(
+mutatingTool(
   'place_bets',
   'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
   {
@@ -282,7 +291,7 @@ tool(
   },
 );
 
-tool(
+mutatingTool(
   'place_bonus_bets',
   'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer".',
   {
