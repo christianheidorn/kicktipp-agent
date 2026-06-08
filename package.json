@@ -5,10 +5,12 @@
   "type": "module",
   "bin": {
     "kicktipp": "./dist/index.js",
-    "kicktipp-mcp": "./dist/server.js"
+    "kicktipp-mcp": "./dist/server.js",
+    "kicktipp-mcp-http": "./dist/http-server.js"
   },
   "scripts": {
     "build": "tsc",
+    "start:http": "node dist/http-server.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

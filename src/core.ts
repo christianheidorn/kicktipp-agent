@@ -247,7 +247,7 @@ export async function fetchBets(page: Page, community: string, matchday?: number
 }
 
 export async function fetchSchedule(page: Page, community: string, matchday?: number): Promise<{ title: string; matches: ScheduleMatch[] }> {
-  let url = `${URL_BASE}/${encodeURIComponent(community)}/schedule`;
+  let url = `${URL_BASE}/${encodeURIComponent(community)}/spielplan`;
   if (matchday !== undefined) {
     if (matchday < 1 || matchday > 34) throw new RangeError(`Matchday '${matchday}' is not valid, use 1-34.`);
     url += `?spieltagIndex=${matchday}`;
@@ -366,7 +366,7 @@ export async function fetchOverview(page: Page, community: string, view = 'match
     throw new Error(`Unknown view '${view}'. Options: ${OVERVIEW_VIEW_OPTIONS.join(', ')}`);
   }
   const [ansicht, label] = OVERVIEW_VIEWS[view];
-  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/overview?ansicht=${ansicht}`);
+  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/gesamtuebersicht?ansicht=${ansicht}`);
   const content = $('#kicktipp-content');
   const savedPlayer = loadPlayer();
 
@@ -407,7 +407,7 @@ export async function fetchOverview(page: Page, community: string, view = 'match
 }
 
 export async function fetchTable(page: Page, community: string, option?: 'home' | 'away'): Promise<{ label: string; teams: TableTeam[] }> {
-  let url = `${URL_BASE}/${encodeURIComponent(community)}/tables`;
+  let url = `${URL_BASE}/${encodeURIComponent(community)}/tabellen`;
   let label = 'League Table';
   if (option === 'home') { url += '?option=heim'; label = 'League Table (Home)'; }
   else if (option === 'away') { url += '?option=gast'; label = 'League Table (Away)'; }
@@ -441,7 +441,7 @@ export async function fetchTable(page: Page, community: string, option?: 'home' 
 }
 
 export async function fetchRules(page: Page, community: string): Promise<RulesSection[]> {
-  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/rules`);
+  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/spielregeln`);
   const pagecontent = $('#kicktipp-content div.pagecontent');
   if (!pagecontent.length) return [];
 
@@ -544,7 +544,7 @@ export async function placeBets(page: Page, community: string, bets: string[], m
 }
 
 export async function fetchBonusQuestions(page: Page, community: string): Promise<BonusQuestion[]> {
-  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/predict?bonus=true`);
+  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/tippabgabe?bonus=true`);
   const content = $('#kicktipp-content');
   const table = content.find('table#tippabgabeFragen');
   if (!table.length) return [];

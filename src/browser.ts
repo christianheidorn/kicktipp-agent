@@ -7,15 +7,25 @@ import { URL_BASE, URL_LOGIN, getLeaderboardUrl } from './url.js';
 import { SESSION_FILE, loadCredentials } from './config.js';
 import { status, statusClear } from './helpers/spinner.js';
 
-export async function launchBrowser(): Promise<{ browser: Browser; page: Page; context: BrowserContext }> {
+export interface LaunchOptions {
+  email?: string;
+  password?: string;
+  // Path to persist the storage state. Pass null to skip persistence
+  // (use case: multi-user session pool where each user has an in-memory context).
+  sessionFile?: string | null;
+}
+
+export async function launchBrowser(
+  opts: LaunchOptions = {},
+): Promise<{ browser: Browser; page: Page; context: BrowserContext }> {
+  const sessionFile = opts.sessionFile === undefined ? SESSION_FILE : opts.sessionFile;
   const browser = await chromium.launch({ headless: true });
 
-  // Try restoring session
-  if (fs.existsSync(SESSION_FILE)) {
+  if (sessionFile && fs.existsSync(sessionFile)) {
     status('Restoring session...');
     const context = await browser.newContext({
       viewport: { width: 1280, height: 900 },
-      storageState: SESSION_FILE,
+      storageState: sessionFile,
     });
     const page = await context.newPage();
     await page.goto(URL_BASE);
@@ -28,14 +38,17 @@ export async function launchBrowser(): Promise<{ browser: Browser; page: Page; c
     await context.close();
   }
 
-  // Fresh login
-  const { email, password } = await loadCredentials();
+  const creds = opts.email && opts.password
+    ? { email: opts.email, password: opts.password }
+    : await loadCredentials();
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
-  await login(page, email, password);
-  fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
-  await context.storageState({ path: SESSION_FILE });
-  fs.chmodSync(SESSION_FILE, 0o600);
+  await login(page, creds.email, creds.password);
+  if (sessionFile) {
+    fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
+    await context.storageState({ path: sessionFile });
+    fs.chmodSync(sessionFile, 0o600);
+  }
   return { browser, page, context };
 }
 
@@ -43,7 +56,10 @@ export async function dismissConsent(page: Page): Promise<void> {
   try {
     await page.waitForSelector('iframe[src*="privacy-mgmt"]', { timeout: 2000 });
     for (const frame of page.frames()) {
-      const btn = await frame.$('button:has-text("Accept and continue")');
+      const btn =
+        (await frame.$('button:has-text("Accept and continue")')) ||
+        (await frame.$('button:has-text("Akzeptieren und weiter")')) ||
+        (await frame.$('button:has-text("Akzeptieren")'));
       if (btn) {
         await btn.click();
         await page.waitForSelector('iframe[src*="privacy-mgmt"]', { state: 'hidden', timeout: 3000 });
@@ -65,8 +81,7 @@ async function login(page: Page, username: string, password: string): Promise<vo
   await Promise.all([page.waitForNavigation(), page.click('button[type="submit"]')]);
   if (page.url().includes('/login')) {
     statusClear();
-    console.error('Login failed. Check your credentials (use --logout to re-enter).');
-    process.exit(1);
+    throw new Error('Kicktipp login failed. Check your credentials.');
   }
   statusClear();
 }
@@ -79,20 +94,19 @@ export async function getCommunities(page: Page): Promise<string[]> {
 
   const $ = cheerio.load(await page.content());
   const links = $('#kicktipp-content a');
-  const communities: string[] = [];
+  const communities = new Set<string>();
+  const reserved = new Set(['info', 'service']);
   links.each((_, el) => {
-    const href = ($(el).attr('href') || '').replace(/\//g, '');
-    const text = $(el).text().trim();
-    const menuDiv = $(el).find('div.menu-title-mit-tippglocke');
-    if (
-      href.toLowerCase() === text.toLowerCase() ||
-      (menuDiv.length && menuDiv.text().trim().toLowerCase() === href.toLowerCase())
-    ) {
-      communities.push(href);
-    }
+    const raw = $(el).attr('href') || '';
+    // Community links look like "/<slug>/" or "/<slug>" — a single path segment.
+    const match = raw.match(/^\/([^/?#]+)\/?$/);
+    if (!match) return;
+    const slug = match[1];
+    if (reserved.has(slug)) return;
+    communities.add(slug);
   });
   statusClear();
-  return communities;
+  return Array.from(communities);
 }
 
 export function parseOdds($: cheerio.CheerioAPI, td: AnyNode): [string, string, string] {

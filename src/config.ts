@@ -4,6 +4,7 @@ import os from 'os';
 import crypto from 'crypto';
 import * as ini from 'ini';
 import readline from 'readline';
+import { requestContext } from './request-context.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'kicktipp-agent');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.ini');
@@ -58,6 +59,10 @@ function writeConfig(config: Record<string, any>): void {
 // ── Credentials ─────────────────────────────────────────────────────
 
 export async function loadCredentials(): Promise<{ email: string; password: string }> {
+  const ctx = requestContext.getStore();
+  if (ctx?.email && ctx?.password) {
+    return { email: ctx.email, password: ctx.password };
+  }
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) {
     return { email: process.env.KICKTIPP_EMAIL, password: process.env.KICKTIPP_PASSWORD };
   }
@@ -112,28 +117,42 @@ export async function loadCredentials(): Promise<{ email: string; password: stri
 }
 
 export function loadCommunity(): string | null {
+  const ctx = requestContext.getStore();
+  if (ctx?.community) return ctx.community;
+  if (process.env.KICKTIPP_COMMUNITY) return process.env.KICKTIPP_COMMUNITY;
   const config = readConfig();
   return config.community?.name || null;
 }
 
 export function saveCommunity(name: string): void {
+  if (requestContext.getStore()?.community || process.env.KICKTIPP_COMMUNITY) {
+    throw new Error('Community is set per-request or via KICKTIPP_COMMUNITY env var and cannot be changed at runtime.');
+  }
   const config = readConfig();
   config.community = { name };
   writeConfig(config);
 }
 
 export function loadPlayer(): string | null {
+  const ctx = requestContext.getStore();
+  if (ctx?.player) return ctx.player;
+  if (process.env.KICKTIPP_PLAYER) return process.env.KICKTIPP_PLAYER;
   const config = readConfig();
   return config.player?.name || null;
 }
 
 export function savePlayer(name: string): void {
+  if (requestContext.getStore()?.player || process.env.KICKTIPP_PLAYER) {
+    throw new Error('Player is set per-request or via KICKTIPP_PLAYER env var and cannot be changed at runtime.');
+  }
   const config = readConfig();
   config.player = { name };
   writeConfig(config);
 }
 
 export function hasCredentials(): boolean {
+  const ctx = requestContext.getStore();
+  if (ctx?.email && ctx?.password) return true;
   if (process.env.KICKTIPP_EMAIL && process.env.KICKTIPP_PASSWORD) return true;
   const config = readConfig();
   return !!(config.auth?.email && config.auth?.password);

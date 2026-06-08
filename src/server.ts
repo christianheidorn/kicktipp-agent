@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { Browser, Page, BrowserContext } from 'playwright';
 import { launchBrowser } from './browser.js';
 import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials } from './config.js';
+import { requestContext } from './request-context.js';
+import { getSessionPage } from './session-pool.js';
 import {
   resolveCommunity,
   fetchTodayMatches,
@@ -30,6 +32,10 @@ let pageInstance: Page | null = null;
 let contextInstance: BrowserContext | null = null;
 
 async function getPage(): Promise<Page> {
+  const ctx = requestContext.getStore();
+  if (ctx?.email && ctx?.password) {
+    return getSessionPage(ctx.email, ctx.password);
+  }
   if (pageInstance) {
     try {
       await pageInstance.evaluate(() => true);
@@ -52,6 +58,7 @@ async function getPage(): Promise<Page> {
 
 // ── MCP Server ─────────────────────────────────────────────────────
 
+export function createServer(): McpServer {
 const server = new McpServer(
   { name: 'kicktipp', version: '1.0.0' },
   { instructions: 'kicktipp.com football prediction game. IMPORTANT: Call get_status first to check if credentials and a community are configured. If credentials are missing, tell the user to either set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal. If only the community is missing, call get_communities then set_community.' },
@@ -268,14 +275,30 @@ server.tool(
   },
 );
 
+return server;
+}
+
 // ── Start ──────────────────────────────────────────────────────────
 
 async function main() {
+  const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
-main().catch((err) => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+// Only run stdio main when invoked directly (not when imported by http-server.ts).
+const invokedDirectly = (() => {
+  try {
+    const entry = process.argv[1] ? new URL(`file://${process.argv[1]}`).href : '';
+    return entry === import.meta.url;
+  } catch {
+    return false;
+  }
+})();
+
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}
