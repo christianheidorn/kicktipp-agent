@@ -10,9 +10,13 @@ primary_region = "fra"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  # Keep one machine warm. Auto-stop with min=0 caused Fly's proxy to fail
+  # routing ("could not find a good candidate") for requests that arrived
+  # while the machine was waking up, which the upstream platform interpreted
+  # as connection errors.
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
   [http_service.concurrency]
     type = "requests"
