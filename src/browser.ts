@@ -15,6 +15,18 @@ export interface LaunchOptions {
   sessionFile?: string | null;
 }
 
+// Cut page-load weight ~70% by blocking images/fonts/media and the
+// consent-management iframe — we only scrape DOM and submit forms.
+async function blockHeavyResources(context: BrowserContext): Promise<void> {
+  await context.route('**/*', (route) => {
+    const type = route.request().resourceType();
+    if (type === 'image' || type === 'font' || type === 'media') return route.abort();
+    const url = route.request().url();
+    if (/privacy-mgmt|sourcepoint|cmp\.|consent/i.test(url)) return route.abort();
+    return route.continue();
+  });
+}
+
 export async function launchBrowser(
   opts: LaunchOptions = {},
 ): Promise<{ browser: Browser; page: Page; context: BrowserContext }> {
@@ -27,6 +39,7 @@ export async function launchBrowser(
       viewport: { width: 1280, height: 900 },
       storageState: sessionFile,
     });
+    await blockHeavyResources(context);
     const page = await context.newPage();
     await page.goto(URL_BASE, { waitUntil: 'domcontentloaded' });
     if (!page.url().includes('/login')) {
@@ -41,6 +54,7 @@ export async function launchBrowser(
     ? { email: opts.email, password: opts.password }
     : await loadCredentials();
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await blockHeavyResources(context);
   const page = await context.newPage();
   await login(page, creds.email, creds.password);
   if (sessionFile) {
@@ -53,7 +67,10 @@ export async function launchBrowser(
 
 export async function dismissConsent(page: Page): Promise<void> {
   try {
-    await page.waitForSelector('iframe[src*="privacy-mgmt"]', { timeout: 2000 });
+    // We block the consent iframe at the route layer, so this almost always
+    // times out — keep a short fallback for the rare cases where the block
+    // doesn't catch a variant URL.
+    await page.waitForSelector('iframe[src*="privacy-mgmt"]', { timeout: 500 });
     for (const frame of page.frames()) {
       const btn =
         (await frame.$('button:has-text("Accept and continue")')) ||
@@ -76,7 +93,10 @@ async function login(page: Page, username: string, password: string): Promise<vo
   await dismissConsent(page);
   await page.fill('input[name="kennung"]', username);
   await page.fill('input[name="passwort"]', password);
-  await Promise.all([page.waitForNavigation(), page.click('button[type="submit"]')]);
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }),
+    page.click('button[type="submit"]'),
+  ]);
   if (page.url().includes('/login')) {
     statusClear();
     throw new Error('Kicktipp login failed. Check your credentials.');
