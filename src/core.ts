@@ -22,7 +22,14 @@ async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
   if (/\/(login|profile\/login|profil\/login)(\?|$|\/)/i.test(finalUrl)) {
     throw new Error(`Kicktipp session is not authenticated (redirected to ${finalUrl}). Verify credentials.`);
   }
-  return cheerio.load(await page.content());
+  const html = await page.content();
+  // Some stale-session requests get a 200 "Seite wurde nicht gefunden" page
+  // instead of a /login redirect — treat that as auth-lost too so the retry
+  // wrapper can evict the cached browser and try a fresh login.
+  if (/Seite\s+wurde\s+nicht\s+gefunden/i.test(html)) {
+    throw new Error(`Kicktipp session is not authenticated (page not found at ${finalUrl}). Verify credentials.`);
+  }
+  return cheerio.load(html);
 }
 
 function parseMatchDate(dateStr: string): Date | null {

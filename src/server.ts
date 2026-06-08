@@ -7,7 +7,7 @@ import { Browser, Page, BrowserContext } from 'playwright';
 import { launchBrowser } from './browser.js';
 import { saveCommunity, savePlayer, loadCommunity, loadPlayer, hasCredentials } from './config.js';
 import { requestContext } from './request-context.js';
-import { getSessionPage } from './session-pool.js';
+import { getSessionPage, invalidateSession, isAuthError } from './session-pool.js';
 import {
   resolveCommunity,
   fetchTodayMatches,
@@ -30,6 +30,20 @@ import {
 let browserInstance: Browser | null = null;
 let pageInstance: Page | null = null;
 let contextInstance: BrowserContext | null = null;
+
+// Wraps a tool body so that if the kicktipp session has gone stale (cached
+// browser context still holds an expired cookie), we evict and retry once
+// before surfacing the error.
+async function withFreshSession<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!isAuthError(err)) throw err;
+    const ctx = requestContext.getStore();
+    if (ctx?.email) await invalidateSession(ctx.email);
+    return await fn();
+  }
+}
 
 async function getPage(): Promise<Page> {
   const ctx = requestContext.getStore();
@@ -64,7 +78,15 @@ const server = new McpServer(
   { instructions: 'kicktipp.com football prediction game. IMPORTANT: Call get_status first to check if credentials and a community are configured. If credentials are missing, tell the user to either set KICKTIPP_EMAIL and KICKTIPP_PASSWORD env vars in the MCP server config, or run `kicktipp set-community` in a terminal. If only the community is missing, call get_communities then set_community.' },
 );
 
-server.tool(
+// Wrap server.tool so every handler auto-retries once if the cached kicktipp
+// session is stale (cookie expired between requests).
+const tool: typeof server.tool = ((...args: unknown[]) => {
+  const handler = args.pop() as (...a: unknown[]) => Promise<unknown>;
+  const wrapped = (...handlerArgs: unknown[]) => withFreshSession(() => handler(...handlerArgs));
+  return (server.tool as (...a: unknown[]) => unknown)(...args, wrapped);
+}) as typeof server.tool;
+
+tool(
   'get_status',
   'Check current configuration. Call this first to see if a community and player are set. Most tools require a community. Use set_community and set_player if not configured.',
   {},
@@ -91,7 +113,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_today_matches',
   "Get today's matches with bet status. Shows which games are happening today and whether bets have been placed.",
   {},
@@ -103,7 +125,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_bets',
   'Get all matches and your current bets for a matchday. Shows team names (use these exact names for place_bets), your placed bets, and odds.',
   { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
@@ -115,7 +137,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_schedule',
   'Get the match schedule with results for a matchday.',
   { matchday: z.number().int().min(1).max(34).optional().describe('Matchday number (1-34). Omit for current matchday.') },
@@ -127,7 +149,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_leaderboard',
   'Get player rankings for a matchday. Includes matches/results and ranking table with points.',
   {
@@ -142,7 +164,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_overview',
   'Get the season overview showing all players and their points across matchdays.',
   { view: z.enum(OVERVIEW_VIEW_OPTIONS as [string, ...string[]]).optional().describe('View type. Default: matchday-points.') },
@@ -154,7 +176,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_table',
   'Get the league table (standings of the actual football teams, not the prediction game).',
   { option: z.enum(['home', 'away']).optional().describe('Filter by home or away games only.') },
@@ -166,7 +188,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_rules',
   'Get the game rules and scoring system.',
   {},
@@ -178,7 +200,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_communities',
   'List all kicktipp communities the user belongs to.',
   {},
@@ -189,7 +211,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_players',
   'List all players in the saved community.',
   {},
@@ -201,7 +223,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'set_community',
   'Set the active community. Use get_communities first to see available options, then pass the exact name.',
   { name: z.string().describe('Exact community name as returned by get_communities.') },
@@ -216,7 +238,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'set_player',
   'Set which player you are (for leaderboard highlighting). Use get_players first to see available names.',
   { name: z.string().describe('Exact player name as returned by get_players.') },
@@ -232,7 +254,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'get_bonus_questions',
   'Get available bonus questions with their options and current selections.',
   {},
@@ -244,7 +266,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'place_bets',
   'Place match bets by fixture name. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact team names from get_bets first. Format each bet as "Home vs Away=H:G" where H and G are goal counts.',
   {
@@ -260,7 +282,7 @@ server.tool(
   },
 );
 
-server.tool(
+tool(
   'place_bonus_bets',
   'Place bonus question answers. DESTRUCTIVE: submits real bets. Use dry_run=true to preview without submitting. Get exact question text and options from get_bonus_questions first. Format each as "Question text=Answer".',
   {

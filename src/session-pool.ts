@@ -28,6 +28,14 @@ async function isPageAlive(page: Page): Promise<boolean> {
   }
 }
 
+export function isAuthError(err: unknown): boolean {
+  return err instanceof Error && /Kicktipp (login failed|session is not authenticated)/i.test(err.message);
+}
+
+export async function invalidateSession(email: string): Promise<void> {
+  await evict(userKey(email));
+}
+
 async function evict(key: string): Promise<void> {
   const entry = pool.get(key);
   if (!entry) return;
