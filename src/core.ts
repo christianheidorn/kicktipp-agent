@@ -558,6 +558,128 @@ export async function placeBets(page: Page, community: string, bets: string[], m
   return placed;
 }
 
+// ── Admin: Tipps nachtragen ───────────────────────────────────────
+// Lets a Spielleiter (admin) set predictions for any member, including
+// "dummy" members that have no login. URLs:
+//   /<community>/spielleiter/mitgliederliste              — member list
+//   /<community>/spielleiter/tippsnachtragen              — picker (no params)
+//   /<community>/spielleiter/tippsnachtragen?tipperId=X&tippsaisonId=Y — edit page
+
+export interface MemberEntry {
+  name: string;
+  tipperId: string;
+  status?: string;
+}
+
+export async function fetchMembers(page: Page, community: string): Promise<MemberEntry[]> {
+  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/spielleiter/mitgliederliste`);
+  const members = new Map<string, MemberEntry>();
+  // Member rows typically have a link whose href carries tipperId. Capture
+  // every anchor that mentions tipperId, dedupe by id, take the link text
+  // as the name. Row's text content as a coarse status hint.
+  $('a[href*="tipperId="]').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    const m = href.match(/tipperId=(\d+)/);
+    if (!m) return;
+    const tipperId = m[1];
+    const name = $(el).text().trim();
+    if (!name) return;
+    const rowText = $(el).closest('tr').text().trim();
+    const status = /Dummy/i.test(rowText) ? 'Dummy' : /aktiv/i.test(rowText) ? 'active' : undefined;
+    if (!members.has(tipperId)) members.set(tipperId, { name, tipperId, status });
+  });
+  return Array.from(members.values());
+}
+
+async function discoverSaisonId(page: Page, community: string): Promise<string> {
+  const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/spielleiter/tippsnachtragen`);
+  // The picker page links/forms include tippsaisonId — grab the first.
+  for (const el of $('a[href*="tippsaisonId="], form[action*="tippsaisonId="]').toArray()) {
+    const attr = $(el).attr('href') || $(el).attr('action') || '';
+    const m = attr.match(/tippsaisonId=(\d+)/);
+    if (m) return m[1];
+  }
+  // Fallback: hidden input.
+  const hidden = $('input[name="tippsaisonId"]').attr('value');
+  if (hidden) return hidden;
+  throw new Error('Could not discover tippsaisonId from admin tippsnachtragen page.');
+}
+
+export async function placeBetsForMember(
+  page: Page,
+  community: string,
+  tipperId: string,
+  bets: string[],
+  matchday?: number,
+  submit = true,
+): Promise<PlacedBet[]> {
+  const tippsaisonId = await discoverSaisonId(page, community);
+  let url = `${URL_BASE}/${encodeURIComponent(community)}/spielleiter/tippsnachtragen?tipperId=${encodeURIComponent(tipperId)}&tippsaisonId=${encodeURIComponent(tippsaisonId)}`;
+  if (matchday !== undefined) {
+    if (matchday < 1 || matchday > 34) throw new RangeError(`Matchday '${matchday}' is not valid, use 1-34.`);
+    url += `&spieltagIndex=${matchday}`;
+  }
+  const $ = await loadPage(page, url);
+  const tbody = $('#kicktipp-content tbody');
+  if (!tbody.length) throw new Error('No matches found on tippsnachtragen page.');
+
+  const editable: EditableMatch[] = [];
+  tbody.find('tr').each((_, tr) => {
+    const cols = $(tr).find('td');
+    if (cols.length < 4) return;
+    // Layout: [date, home, away, score-inputs, ...]. Inputs may have
+    // different id suffixes here; match by name pattern instead.
+    const inputs = $(tr).find('input[type="text"], input:not([type])');
+    if (inputs.length < 2) return;
+    const heimName = inputs.eq(0).attr('name');
+    const gastName = inputs.eq(1).attr('name');
+    if (!heimName || !gastName) return;
+    editable.push({
+      home: $(cols[1]).text().trim(),
+      away: $(cols[2]).text().trim(),
+      heimName,
+      gastName,
+    });
+  });
+
+  if (!editable.length) throw new Error('No editable matches found on tippsnachtragen page.');
+
+  const parsed: { entry: EditableMatch; h: number; g: number }[] = [];
+  const seen = new Set<string>();
+  for (const arg of bets) {
+    const { home, away, h, g } = parseBetArg(arg);
+    const key = `${home.toLowerCase()}|${away.toLowerCase()}`;
+    if (seen.has(key)) throw new Error(`Duplicate fixture: "${home} vs ${away}"`);
+    seen.add(key);
+    parsed.push({ entry: matchFixture(home, away, editable), h, g });
+  }
+
+  const placed: PlacedBet[] = [];
+  for (const { entry, h, g } of parsed) {
+    const heimEl = await page.$(`input[name="${escapeCssValue(entry.heimName)}"]`);
+    const gastEl = await page.$(`input[name="${escapeCssValue(entry.gastName)}"]`);
+    if (heimEl) await heimEl.fill(String(h));
+    if (gastEl) await gastEl.fill(String(g));
+    placed.push({ home: entry.home, away: entry.away, homeGoals: h, awayGoals: g });
+  }
+
+  if (submit) {
+    // Form button text is "Tipps speichern". Match by visible text since
+    // name may differ from the regular tippabgabe form.
+    const button =
+      (await page.$('button:has-text("Tipps speichern")')) ||
+      (await page.$('button[name="submitbutton"]')) ||
+      (await page.$('input[type="submit"]'));
+    if (!button) throw new Error('Submit button not found on tippsnachtragen page.');
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }),
+      button.click(),
+    ]);
+  }
+
+  return placed;
+}
+
 export async function fetchBonusQuestions(page: Page, community: string): Promise<BonusQuestion[]> {
   const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/tippabgabe?bonus=true`);
   const content = $('#kicktipp-content');

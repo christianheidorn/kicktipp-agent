@@ -22,6 +22,8 @@ import {
   fetchBonusQuestions,
   placeBets,
   placeBonusBets,
+  fetchMembers,
+  placeBetsForMember,
   OVERVIEW_VIEW_OPTIONS,
 } from './core.js';
 
@@ -288,6 +290,35 @@ mutatingTool(
     const community = await resolveCommunity(page);
     const placed = await placeBets(page, community, bets, matchday, !dry_run);
     return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, placed }, null, 2) }] };
+  },
+);
+
+tool(
+  'list_members',
+  'ADMIN ONLY: List all members of the community with their tipperId and status (Dummy/active). Use this to find a member by name and look up their tipperId for place_bets_for_member. Requires the logged-in user to be a Spielleiter (admin) of the community.',
+  {},
+  async () => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    const data = await fetchMembers(page, community);
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  },
+);
+
+mutatingTool(
+  'place_bets_for_member',
+  'ADMIN ONLY: Place bets on behalf of another member (e.g. a Dummy member with no login). DESTRUCTIVE: submits real bets. Use list_members to find the tipperId. Get team names from get_bets first. Format each bet as "Home vs Away=H:G". Requires Spielleiter (admin) rights.',
+  {
+    tipperId: z.string().describe('Numeric tipperId of the target member, from list_members.'),
+    bets: z.array(z.string()).min(1).describe('Bets in format "Home vs Away=H:G".'),
+    matchday: z.number().int().min(1).max(34).optional().describe('Matchday (1-34). Omit for current.'),
+    dry_run: z.boolean().optional().describe('If true, validate and return what would be placed without submitting.'),
+  },
+  async ({ tipperId, bets, matchday, dry_run }) => {
+    const page = await getPage();
+    const community = await resolveCommunity(page);
+    const placed = await placeBetsForMember(page, community, tipperId, bets, matchday, !dry_run);
+    return { content: [{ type: 'text', text: JSON.stringify({ success: !dry_run, dry_run: !!dry_run, tipperId, placed }, null, 2) }] };
   },
 );
 
