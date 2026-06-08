@@ -571,24 +571,48 @@ export interface MemberEntry {
   status?: string;
 }
 
-export async function fetchMembers(page: Page, community: string): Promise<MemberEntry[]> {
+export async function fetchMembers(page: Page, community: string): Promise<MemberEntry[] | { _diagnostic: unknown }> {
   const $ = await loadPage(page, `${URL_BASE}/${encodeURIComponent(community)}/spielleiter/mitgliederliste`);
   const members = new Map<string, MemberEntry>();
-  // Member rows typically have a link whose href carries tipperId. Capture
-  // every anchor that mentions tipperId, dedupe by id, take the link text
-  // as the name. Row's text content as a coarse status hint.
-  $('a[href*="tipperId="]').each((_, el) => {
-    const href = $(el).attr('href') || '';
-    const m = href.match(/tipperId=(\d+)/);
-    if (!m) return;
-    const tipperId = m[1];
-    const name = $(el).text().trim();
-    if (!name) return;
-    const rowText = $(el).closest('tr').text().trim();
-    const status = /Dummy/i.test(rowText) ? 'Dummy' : /aktiv/i.test(rowText) ? 'active' : undefined;
-    if (!members.has(tipperId)) members.set(tipperId, { name, tipperId, status });
-  });
-  return Array.from(members.values());
+
+  // Try several known patterns for member identification.
+  const patterns: Array<{ selector: string; idRegex: RegExp }> = [
+    { selector: 'a[href*="tipperId="]', idRegex: /tipperId=(\d+)/ },
+    { selector: 'a[href*="tipper="]', idRegex: /tipper=(\d+)/ },
+    { selector: 'a[href*="mitglied="]', idRegex: /mitglied=(\d+)/ },
+    { selector: 'a[href*="/spielleiter/mitgliedsdaten"]', idRegex: /(\d{4,})/ },
+    { selector: 'a[href*="tippsnachtragen"]', idRegex: /tipperId=(\d+)/ },
+  ];
+  for (const { selector, idRegex } of patterns) {
+    $(selector).each((_, el) => {
+      const href = $(el).attr('href') || '';
+      const m = href.match(idRegex);
+      if (!m) return;
+      const tipperId = m[1];
+      const name = $(el).text().trim();
+      if (!name) return;
+      const rowText = $(el).closest('tr').text().trim();
+      const status = /Dummy/i.test(rowText) ? 'Dummy' : /aktiv/i.test(rowText) ? 'active' : undefined;
+      if (!members.has(tipperId)) members.set(tipperId, { name, tipperId, status });
+    });
+    if (members.size) return Array.from(members.values());
+  }
+
+  // Diagnostic dump so we can adjust the parser without redeploying blind.
+  const allAnchors = $('a').toArray().slice(0, 25).map((el) => ({
+    href: $(el).attr('href') || null,
+    text: $(el).text().trim().slice(0, 60),
+  }));
+  const tableRows = $('table tbody tr').toArray().slice(0, 5).map((tr) => $(tr).html()?.slice(0, 500) || '');
+  return {
+    _diagnostic: {
+      message: 'No members found by any known pattern. Paste this back so the parser can be adjusted.',
+      pageTitle: $('title').text().trim(),
+      contentH1: $('#kicktipp-content h1, .pagetitle').first().text().trim(),
+      anchorSample: allAnchors,
+      tableRowSamples: tableRows,
+    },
+  };
 }
 
 async function discoverSaisonId(page: Page, community: string): Promise<string> {
