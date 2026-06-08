@@ -12,6 +12,10 @@ interface Entry {
 
 const IDLE_TTL_MS = 15 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 60 * 1000;
+// Hard cap on concurrent cached sessions. Each Chromium context is ~150 MB;
+// the 1 GB Fly VM realistically tops out around 5. Override via env if you
+// resize the machine.
+const MAX_SESSIONS = Number(process.env.MCP_MAX_SESSIONS || 4);
 
 const pool = new Map<string, Entry>();
 
@@ -34,6 +38,23 @@ export function isAuthError(err: unknown): boolean {
 
 export async function invalidateSession(email: string): Promise<void> {
   await evict(userKey(email));
+}
+
+// Evict least-recently-used non-inflight entries until we're below the cap.
+async function enforceCapacity(): Promise<void> {
+  while (pool.size >= MAX_SESSIONS) {
+    let oldestKey: string | null = null;
+    let oldestUsed = Infinity;
+    for (const [k, e] of pool) {
+      if (e.inFlight) continue;
+      if (e.lastUsed < oldestUsed) {
+        oldestUsed = e.lastUsed;
+        oldestKey = k;
+      }
+    }
+    if (!oldestKey) break; // everything is mid-launch — let one finish
+    await evict(oldestKey);
+  }
 }
 
 async function evict(key: string): Promise<void> {
@@ -60,6 +81,8 @@ export async function getSessionPage(email: string, password: string): Promise<P
     }
     await evict(key);
   }
+
+  await enforceCapacity();
 
   const launchPromise = launchBrowser({ email, password, sessionFile: null }).then(({ browser, context, page }) => {
     const entry: Entry = { browser, context, page, lastUsed: Date.now(), inFlight: null };
