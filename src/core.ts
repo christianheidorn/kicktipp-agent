@@ -16,6 +16,12 @@ async function loadPage(page: Page, url: string): Promise<cheerio.CheerioAPI> {
   await page.goto(url);
   await page.waitForLoadState('domcontentloaded');
   await dismissConsent(page);
+  // Kicktipp redirects to /login when the session is invalid. Surface this
+  // as an explicit error so callers don't silently get empty parse results.
+  const finalUrl = page.url();
+  if (/\/(login|profile\/login|profil\/login)(\?|$|\/)/i.test(finalUrl)) {
+    throw new Error(`Kicktipp session is not authenticated (redirected to ${finalUrl}). Verify credentials.`);
+  }
   return cheerio.load(await page.content());
 }
 

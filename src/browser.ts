@@ -91,6 +91,10 @@ export async function getCommunities(page: Page): Promise<string[]> {
   await page.goto(`${URL_BASE}/info/profil/meinetipprunden`);
   await page.waitForLoadState('domcontentloaded');
   await dismissConsent(page);
+  const finalUrl = page.url();
+  if (/\/(login|profile\/login|profil\/login)(\?|$|\/)/i.test(finalUrl)) {
+    throw new Error(`Kicktipp session is not authenticated (redirected to ${finalUrl}). Verify credentials.`);
+  }
 
   const $ = cheerio.load(await page.content());
   const links = $('#kicktipp-content a');
