@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
 import { launchBrowser, dismissConsent } from '../browser.js';
-import { URL_BASE } from '../url.js';
+import { getTableUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 
@@ -17,16 +17,13 @@ export function registerTableCommand(program: Command): void {
         const community = await ensureCommunity(page);
 
         status('Loading table...');
-        let url = `${URL_BASE}/${community}/tables`;
-        let option: string | null = null;
+        let option: 'home' | 'away' | undefined;
         if (opts.home) {
-          option = 'heim';
-          url += '?option=heim';
+          option = 'home';
         } else if (opts.away) {
-          option = 'gast';
-          url += '?option=gast';
+          option = 'away';
         }
-        await page.goto(url);
+        await page.goto(getTableUrl(community, option));
         await page.waitForLoadState('domcontentloaded');
         await dismissConsent(page);
         statusClear();
@@ -35,9 +32,9 @@ export function registerTableCommand(program: Command): void {
         const content = $('#kicktipp-content');
 
         let label = 'League Table';
-        if (option === 'heim') {
+        if (option === 'home') {
           label = 'League Table (Home)';
-        } else if (option === 'gast') {
+        } else if (option === 'away') {
           label = 'League Table (Away)';
         }
         console.log(label);

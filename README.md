@@ -4,19 +4,18 @@ A CLI and MCP server for [kicktipp.com](https://www.kicktipp.com) — the German
 
 ## Why?
 
-Kicktipp has no public API. Everything goes through the website. This project gives you two ways to skip the browser:
+Kicktipp has no public API. Everything goes through the website's server-rendered HTML pages and forms. This project gives you two ways to skip the browser:
 
 - **CLI** — Check scores, standings, and place bets in seconds from the terminal. No clicking through pages, no waiting for ads to load. Useful for quick lookups during matchday or scripting your predictions.
 
 - **MCP Server** — Connect an AI assistant (Claude Desktop, Claude Code, or any MCP client) to your kicktipp account. Ask it to show today's matches, check who's leading your league, or place bets for you — all through natural conversation. The assistant sees your community's data but never your password.
 
-Headless Chromium with session caching keeps things fast. After the first login, subsequent commands reuse the saved session and skip the login flow entirely.
+Plain HTTP requests with cookie-session caching keep things fast. No Chrome, Chromium, or Playwright install is required.
 
 ## Installation
 
 ```bash
 npm install
-npx playwright install chromium
 npm run build
 npm link
 ```
@@ -114,10 +113,14 @@ The MCP server exposes the same functionality as the CLI through the [Model Cont
 | `get_communities` | List communities the user belongs to |
 | `get_players` | List players in the community |
 | `get_bonus_questions` | Bonus questions with options |
+| `get_bonus_questions_for_member` | Admin-only bonus questions/options for a member |
 | `set_community` | Set the active community |
 | `set_player` | Set which player you are |
 | `place_bets` | Place match bets by fixture name |
 | `place_bonus_bets` | Place bonus question answers |
+| `list_members` | Admin-only member list with tipper IDs |
+| `place_bets_for_member` | Admin-only bets on behalf of another member |
+| `place_bonus_bets_for_member` | Admin-only bonus question answers on behalf of another member |
 
 ### Setup with Claude Desktop
 
@@ -161,12 +164,49 @@ Add to `.mcp.json` in your home directory or project:
 
 ### Credentials
 
-The MCP server accepts credentials in two ways (checked in this order):
+Hosted HTTP MCP clients authenticate with a single bearer auth value. Paste the
+auth value into your MCP client connection settings, or send it as the
+`Authorization` bearer token:
+
+```text
+<community>,<player>,<email>,<password>
+```
+
+Example:
+
+```text
+bundesliga-tipps,player-name,player@example.com,example-password
+```
+
+For local stdio MCP setups, the server also accepts credentials in two ways
+(checked in this order):
 
 1. **Environment variables** — `KICKTIPP_EMAIL` and `KICKTIPP_PASSWORD` passed via the `env` block in your MCP client config
 2. **Config file** — `~/.config/kicktipp-agent/config.ini`, shared with the CLI
 
 If neither is found, the server returns an error guiding the agent to inform you.
+
+### Base URL
+
+By default the client uses `https://www.kicktipp.de` and German page routes. You can set
+`KICKTIPP_BASE_URL=https://www.kicktipp.com` to prefer Kicktipp's English routes
+(`predict`, `leaderboard`, `schedule`, `tables`, `rules`). If Kicktipp redirects to
+a route that is unavailable for a community, the browserless client retries the known
+German/English aliases across both `.com` and `.de`.
+
+### HTTP Deployment
+
+The `kicktipp-mcp-http` binary starts a stateless HTTP MCP server on `/mcp` and
+exposes `/health` for deployment checks. A `Dockerfile` and `fly.toml.example`
+are included for container-based deployments.
+
+To deploy on Fly.io, copy the example config and set your own app name:
+
+```bash
+cp fly.toml.example fly.toml
+fly launch --copy-config
+fly deploy
+```
 
 ## Development
 

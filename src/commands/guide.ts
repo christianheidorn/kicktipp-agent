@@ -95,7 +95,7 @@ Exit code 0 on success, 1 on error.
 
 ## Notes
 
-- Each command launches a headless browser, so expect ~2-5 seconds startup.
+- Commands use browserless HTTP requests; startup is mostly login/session latency.
 - Session cookies are cached; re-login happens automatically if expired.
 - The --matchday option accepts 1-34 (one Bundesliga season).
 - Bet format is always H:G (home goals colon away goals).

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
 import { launchBrowser, dismissConsent } from '../browser.js';
-import { URL_BASE } from '../url.js';
+import { getRulesUrl } from '../url.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 
@@ -15,7 +15,7 @@ export function registerRulesCommand(program: Command): void {
         const community = await ensureCommunity(page);
 
         status('Loading rules...');
-        await page.goto(`${URL_BASE}/${community}/rules`);
+        await page.goto(getRulesUrl(community));
         await page.waitForLoadState('domcontentloaded');
         await dismissConsent(page);
         statusClear();

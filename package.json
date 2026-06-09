@@ -5,10 +5,12 @@
   "type": "module",
   "bin": {
     "kicktipp": "./dist/index.js",
-    "kicktipp-mcp": "./dist/server.js"
+    "kicktipp-mcp": "./dist/server.js",
+    "kicktipp-mcp-http": "./dist/http-server.js"
   },
   "scripts": {
     "build": "tsc",
+    "start:http": "node dist/http-server.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -17,8 +19,7 @@
     "cheerio": "^1.0.0",
     "commander": "^13.0.0",
     "ini": "^5.0.0",
-    "ora": "^8.0.0",
-    "playwright": "^1.40.0"
+    "ora": "^8.0.0"
   },
   "devDependencies": {
     "@types/ini": "^4.1.0",

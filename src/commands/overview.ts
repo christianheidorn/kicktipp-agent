@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
 import { launchBrowser, dismissConsent } from '../browser.js';
-import { URL_BASE } from '../url.js';
+import { getOverviewUrl } from '../url.js';
 import { loadPlayer } from '../config.js';
 import { ensureCommunity } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
@@ -33,8 +33,7 @@ export function registerOverviewCommand(program: Command): void {
         const community = await ensureCommunity(page);
 
         status('Loading overview...');
-        const url = `${URL_BASE}/${community}/overview?ansicht=${ansicht}`;
-        await page.goto(url);
+        await page.goto(getOverviewUrl(community, ansicht));
         await page.waitForLoadState('domcontentloaded');
         await dismissConsent(page);
         statusClear();

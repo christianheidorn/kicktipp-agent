@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**kicktipp-agent** is a TypeScript CLI and MCP server for [kicktipp.com](https://www.kicktipp.com) — a German football prediction game platform. It uses Playwright for headless browser automation, Cheerio for HTML parsing, Commander.js for CLI argument parsing, and the MCP SDK to expose tools to AI assistants. The tool can view leaderboards, schedules, league tables, and manage bets (manual and bonus).
+**kicktipp-agent** is a TypeScript CLI and MCP server for [kicktipp.de](https://www.kicktipp.de) — a German football prediction game platform. It uses plain HTTP requests plus cookie sessions, Cheerio for HTML parsing/form serialization, Commander.js for CLI argument parsing, and the MCP SDK to expose tools to AI assistants. The tool can view leaderboards, schedules, league tables, and manage bets (manual and bonus).
 
 ## File Inventory
 
@@ -13,7 +13,7 @@ src/
   core.ts                     # Shared business logic used by both CLI and MCP server
   shared.ts                   # Shared CLI helpers (ask, ensureCommunity)
   config.ts                   # Credential/community/player storage (~/.config/kicktipp-agent/)
-  browser.ts                  # Playwright session management, login, consent, HTML parsing
+  browser.ts                  # HTTP session management, login, form submission, HTML parsing
   url.ts                      # URL constants and builders
   helpers/
     parse-bet-arg.ts          # parseBetArg + matchFixture
@@ -40,7 +40,6 @@ tsconfig.json
 ```bash
 # Install
 npm install
-npx playwright install chromium
 
 # Build
 npm run build
@@ -73,8 +72,8 @@ kicktipp logout
 ### Entry Points
 
 - **`src/index.ts`** — CLI. Commander.js program with subcommands. Simple commands (logout, communities, set-community, players, set-player) are defined inline. View and bet commands are registered via import from `src/commands/`.
-- **`src/server.ts`** — MCP server. Exposes the same functionality as the CLI through the Model Context Protocol. Uses a persistent browser session shared across tool calls.
-- **`src/core.ts`** — Shared business logic (fetching data, placing bets) used by both entry points. All functions take a Playwright `Page` and community name, return structured data.
+- **`src/server.ts`** — MCP server. Exposes the same functionality as the CLI through the Model Context Protocol. Uses a persistent Kicktipp HTTP session shared across tool calls.
+- **`src/core.ts`** — Shared business logic (fetching data, placing bets) used by both entry points. All functions take the local HTTP-backed `Page` shim and community name, return structured data.
 
 ### Credential & Config Storage: `src/config.ts`
 
@@ -83,19 +82,19 @@ kicktipp logout
   - `[auth]` section: `email`, `password`
   - `[community]` section: `name` (saved default community)
   - `[player]` section: `name` (saved player identity for leaderboard marker)
-- **Session:** `session.json` (Playwright storage state for cookie persistence)
+- **Session:** `session.json` (Kicktipp cookie jar for session persistence)
 
-### Browser Automation: `src/browser.ts`
+### HTTP Session: `src/browser.ts`
 
-- Launches `chromium` in headless mode, viewport `1280x900`
-- Uses `domcontentloaded` wait strategy for speed
-- `dismissConsent(page)` — handles cookie consent CMP iframe
-- `login()` — fills `input[name="kennung"]` + `input[name="passwort"]`, submits
+- Uses `fetch` with a first-party Kicktipp cookie jar
+- Keeps a page-like subset (`goto`, `content`, `$`, `fill`, `selectOption`, `click`) so existing parsing code stays small
+- `dismissConsent(page)` — compatibility no-op; the HTTP client never loads the CMP iframe
+- `login()` — posts the `kennung` + `passwort` form directly
 - Session cached to `SESSION_FILE` after successful login; restored on next run
 
 ### HTML Parsing (Cheerio)
 
-All page parsing follows: `page.goto(url)` → `waitForLoadState('domcontentloaded')` → `dismissConsent(page)` → `cheerio.load(await page.content())` → find `#kicktipp-content` → parse tables.
+All page parsing follows: `page.goto(url)` → `cheerio.load(await page.content())` → find `#kicktipp-content` → parse tables.
 
 **Key CSS selectors:**
 - Content wrapper: `#kicktipp-content`
@@ -113,17 +112,21 @@ All page parsing follows: `page.goto(url)` → `waitForLoadState('domcontentload
 ### URL Structure: `src/url.ts`
 
 ```
-Base:         https://www.kicktipp.com
-Login:        /info/profil/login
-Communities:  /info/profil/meinetipprunden
-Predict:      /{community}/predict[?spieltagIndex=N]
-Predict bonus: /{community}/predict?bonus=true
-Leaderboard:  /{community}/leaderboard[?spieltagIndex=N&bonus=true]
-Overview:     /{community}/overview?ansicht={view}
-Schedule:     /{community}/schedule[?spieltagIndex=N]
-Tables:       /{community}/tables[?option=heim|gast]
-Rules:        /{community}/rules
+Base:          https://www.kicktipp.de by default, or KICKTIPP_BASE_URL=https://www.kicktipp.com
+Login:         /info/profil/login              | /info/profile/login
+Communities:   /info/profil/meinetipprunden    | /info/profile/prediction-games
+Predict:       /{community}/tippabgabe         | /{community}/predict
+Predict bonus: /{community}/tippabgabe?bonus=true | /{community}/predict?bonus=true
+Leaderboard:   /{community}/tippuebersicht     | /{community}/leaderboard
+Overview:      /{community}/gesamtuebersicht   | /{community}/overview
+Schedule:      /{community}/tippspielplan      | /{community}/schedule
+Tables:        /{community}/tabellen           | /{community}/tables
+Rules:         /{community}/spielregeln        | /{community}/rules
+Admin:         /{community}/spielleiter/mitgliederliste, /{community}/spielleiter/tippsnachtragen
 ```
+
+The HTTP client retries known German/English aliases across `.com` and `.de` when
+Kicktipp redirects to a missing page, which is common for tournament communities.
 
 ### Bet Argument Parsing: `src/helpers/parse-bet-arg.ts`
 
@@ -132,7 +135,7 @@ Rules:        /{community}/rules
 
 ## Key Details
 
-- Site: `https://www.kicktipp.com` (not .de)
+- Site: `https://www.kicktipp.de` by default; `https://www.kicktipp.com` via `KICKTIPP_BASE_URL`
 - TypeScript with ES2022 target, Node16 module resolution
 - Matchday range: 1-34 (Bundesliga season)
 - Login form: `input[name="kennung"]`, `input[name="passwort"]`

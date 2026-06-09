@@ -1,5 +1,5 @@
 import readline from 'readline';
-import { Page } from 'playwright';
+import { Page } from './browser.js';
 import { loadCommunity, saveCommunity } from './config.js';
 import { getCommunities } from './browser.js';
 

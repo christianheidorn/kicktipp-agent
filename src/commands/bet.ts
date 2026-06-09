@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as cheerio from 'cheerio';
 import { launchBrowser, dismissConsent } from '../browser.js';
-import { getPredictUrl, URL_BASE } from '../url.js';
+import { getBonusPredictUrl, getPredictUrl } from '../url.js';
 import { ensureCommunity, ask } from '../shared.js';
 import { status, statusClear } from '../helpers/spinner.js';
 import {
@@ -49,7 +49,7 @@ function parseBonusQuestions(
       $(sel).find('option').each((_, opt) => {
         const value = $(opt).attr('value') || '';
         const text = $(opt).text().trim();
-        if (value !== '-1') options.push({ value, text });
+        if (value !== '-1' && value !== '-2' && text) options.push({ value, text });
         if ($(opt).attr('selected') !== undefined) selected = value;
       });
       selects.push({ name, options, selected });
@@ -301,13 +301,13 @@ async function bonusBetsNonInteractive(
     argsByQuestion.get(key)!.push(answer);
   }
 
-  for (const [, answers] of argsByQuestion) {
-    const q = findQuestion(answers[0], questions);
+  for (const [questionKey, answers] of argsByQuestion) {
     const firstArg = bets.find((b) => {
       const { question } = parseBonusBetArg(b);
-      return question.toLowerCase() === q.question.toLowerCase();
+      return question.toLowerCase() === questionKey;
     })!;
     const { question: qText } = parseBonusBetArg(firstArg);
+    const q = findQuestion(qText, questions);
 
     if (answers.length > q.selects.length) {
       console.error(
@@ -388,7 +388,7 @@ async function bonusBetsInteractive(
 
 async function bonusBets(page: any, community: string, bets: string[]): Promise<void> {
   status('Loading bonus questions...');
-  await page.goto(`${URL_BASE}/${encodeURIComponent(community)}/predict?bonus=true`);
+  await page.goto(getBonusPredictUrl(community));
   await page.waitForLoadState('domcontentloaded');
   await dismissConsent(page);
   statusClear();
